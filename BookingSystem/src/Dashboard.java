@@ -1,14 +1,14 @@
-import javax.swing.*;
 import java.awt.*;
-import java.util.ArrayList;
-import java.time.LocalDate;
-import java.time.format.DateTimeFormatter;
+import java.awt.event.ComponentAdapter;
+import java.awt.event.ComponentEvent;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import javax.swing.*;
 import javax.swing.table.DefaultTableModel;
-import java.awt.event.ComponentAdapter;
-import java.awt.event.ComponentEvent;
 public class Dashboard extends JFrame {
 
     private JPanel sidebar;
@@ -544,6 +544,7 @@ public class Dashboard extends JFrame {
         JPanel calendarPanel = new JPanel(new BorderLayout());
         calendarPanel.setBackground(Color.WHITE);
         calendarPanel.setBorder(BorderFactory.createLineBorder(new Color(102,0,32),2));
+        calendarPanel.setPreferredSize(new Dimension(900, 350)); // Medium calendar size
 
         // Month/Year selector
         JPanel monthPanel = new JPanel(new FlowLayout());
@@ -575,8 +576,9 @@ public class Dashboard extends JFrame {
         calendarPanel.add(monthPanel, BorderLayout.NORTH);
 
         // Calendar grid
-        calendarGrid = new JPanel(new GridLayout(0,7));
+        calendarGrid = new JPanel(new GridLayout(6,7,5,5)); // 6 rows x 7 columns with smaller spacing
         calendarGrid.setBackground(Color.WHITE);
+        calendarGrid.setPreferredSize(new Dimension(850, 280)); // Moderate size
         updateCalendar();
 
         calendarPanel.add(calendarGrid, BorderLayout.CENTER);
@@ -622,16 +624,16 @@ public class Dashboard extends JFrame {
         });
 
         // Main content
-        JPanel centerWrapper = new JPanel(new GridBagLayout());
+        JPanel centerWrapper = new JPanel(new BorderLayout());
         centerWrapper.setBackground(new Color(245,242,235));
         centerWrapper.setBorder(BorderFactory.createEmptyBorder(20,30,30,30));
 
-        JPanel content = new JPanel(new GridLayout(1,2,20,0));
+        JPanel content = new JPanel(new BorderLayout(0,20));
         content.setBackground(new Color(245,242,235));
-        content.add(calendarPanel);
-        content.add(reservationsPanel);
+        content.add(calendarPanel, BorderLayout.NORTH);
+        content.add(reservationsPanel, BorderLayout.CENTER);
 
-        centerWrapper.add(content, new GridBagConstraints());
+        centerWrapper.add(content, BorderLayout.CENTER);
 
         panel.add(topPanel, BorderLayout.NORTH);
         panel.add(centerWrapper,BorderLayout.CENTER);
@@ -666,9 +668,12 @@ public class Dashboard extends JFrame {
         for(int i = 0; i < 42; i++) { // 6 weeks * 7 days
             LocalDate date = startDate.plusDays(i);
             JButton dayButton = new JButton(String.valueOf(date.getDayOfMonth()));
-            dayButton.setFont(new Font("Arial", Font.PLAIN, 12));
+            dayButton.setFont(new Font("Arial", Font.BOLD, 13));
             dayButton.setFocusPainted(false);
             dayButton.setBorder(BorderFactory.createLineBorder(Color.LIGHT_GRAY, 1));
+            
+            // Check if date has reservations
+            boolean hasReservations = dateHasReservations(date);
             
             if(date.getMonth() != currentCalendarDate.getMonth()) {
                 dayButton.setForeground(Color.GRAY);
@@ -676,6 +681,9 @@ public class Dashboard extends JFrame {
             } else if(date.equals(LocalDate.now())) {
                 dayButton.setBackground(new Color(102,0,32));
                 dayButton.setForeground(Color.WHITE);
+                if(hasReservations) {
+                    dayButton.setBorder(BorderFactory.createLineBorder(new Color(0,153,0), 4));
+                }
                 LocalDate selectedDate = date;
                 dayButton.addActionListener(e -> {
                     selectReservationDate(selectedDate);
@@ -684,7 +692,13 @@ public class Dashboard extends JFrame {
                 dayButton.setEnabled(false);
                 dayButton.setForeground(Color.GRAY);
             } else {
-                dayButton.setBackground(Color.WHITE);
+                if(hasReservations) {
+                    dayButton.setBackground(new Color(200, 220, 255)); // Light blue for dates with reservations
+                    dayButton.setForeground(new Color(0, 0, 120));
+                    dayButton.setBorder(BorderFactory.createLineBorder(new Color(0,153,0), 2));
+                } else {
+                    dayButton.setBackground(Color.WHITE);
+                }
                 LocalDate selectedDate = date;
                 dayButton.addActionListener(e -> {
                     selectReservationDate(selectedDate);
@@ -696,6 +710,22 @@ public class Dashboard extends JFrame {
         
         calendarGrid.revalidate();
         calendarGrid.repaint();
+    }
+
+    private boolean dateHasReservations(LocalDate date) {
+        try {
+            Connection conn = Dbconnection.getConnection();
+            String sql = "SELECT COUNT(*) FROM reservations WHERE DATE(reservation_date) = ? AND status != 'Cancelled'";
+            PreparedStatement pst = conn.prepareStatement(sql);
+            pst.setDate(1, java.sql.Date.valueOf(date));
+            ResultSet rs = pst.executeQuery();
+            if(rs.next()) {
+                return rs.getInt(1) > 0;
+            }
+        } catch(Exception e) {
+            e.printStackTrace();
+        }
+        return false;
     }
 
     private JLabel availabilityLabel;
@@ -873,6 +903,7 @@ public class Dashboard extends JFrame {
                 loadReservationsForDate(resDate);
                 updateTableFromWalkin(selectedTable, "Reserved");
                 updateAvailabilityLabel(resDate);
+                updateCalendar(); // Refresh calendar to show new reservation
             } catch(Exception e) {
                 e.printStackTrace();
                 JOptionPane.showMessageDialog(null, "Error adding reservation!\n" + e.getMessage());
@@ -1306,6 +1337,24 @@ class ButtonEditor extends DefaultCellEditor {
 
         updateCounters();
     }
+}
+
+private boolean hasReservationForTable(LocalDate date, String tableNo){
+    try{
+        Connection conn = Dbconnection.getConnection();
+        String sql = "SELECT COUNT(*) as count FROM reservations WHERE DATE(reservation_date) = ? AND table_no = ? AND status != 'Cancelled'";
+        PreparedStatement pst = conn.prepareStatement(sql);
+        pst.setDate(1, java.sql.Date.valueOf(date));
+        pst.setString(2, tableNo);
+        ResultSet rs = pst.executeQuery();
+        
+        if(rs.next()){
+            return rs.getInt("count") > 0;
+        }
+    }catch(Exception ex){
+        ex.printStackTrace();
+    }
+    return false;
 }
 
  private void loadAvailableTables(JComboBox<String> tableBox){
