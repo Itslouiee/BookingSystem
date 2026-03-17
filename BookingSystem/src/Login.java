@@ -163,13 +163,28 @@ public class Login extends JFrame {
         private Image bgImage;
 
         public ResizableBackgroundPanel(String imagePath) {
-            bgImage = new ImageIcon(imagePath).getImage();
+            try {
+                bgImage = new ImageIcon("src/" + imagePath).getImage();
+                if(bgImage == null || bgImage.getWidth(null) <= 0) {
+                    bgImage = new ImageIcon(imagePath).getImage();
+                }
+                if(bgImage == null || bgImage.getWidth(null) <= 0) {
+                    System.out.println("Warning: Could not load image: " + imagePath);
+                }
+            } catch(Exception e) {
+                System.out.println("Error loading image: " + e.getMessage());
+            }
         }
 
         @Override
         protected void paintComponent(Graphics g) {
             super.paintComponent(g);
-            g.drawImage(bgImage, 0, 0, getWidth(), getHeight(), this);
+            if(bgImage != null && bgImage.getWidth(null) > 0) {
+                g.drawImage(bgImage, 0, 0, getWidth(), getHeight(), this);
+            } else {
+                g.setColor(Color.BLACK);
+                g.fillRect(0, 0, getWidth(), getHeight());
+            }
         }
     }
 
