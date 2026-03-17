@@ -28,6 +28,14 @@ public class Dashboard extends JFrame {
     private JPanel reservationPage;
     private JTable walkinTable;
     private JComboBox<String> tableBox;
+    private JTable reservationsTable;
+    private JPanel calendarGrid;
+    private JLabel monthYearLabel;
+    private LocalDate currentCalendarDate;
+    private LocalDate selectedReservationDate;
+    private JTextField searchField;
+    private JComboBox<String> dateFilterBox;
+    private JButton addReservationBtn;
 
     // tables system
     private JPanel floorPanel;
@@ -264,22 +272,44 @@ public class Dashboard extends JFrame {
     paxField.setFont(new Font("Arial",Font.PLAIN,13));
     paxField.setBorder(BorderFactory.createLineBorder(new Color(196,164,100),1));
 
+    JComboBox<String> dateBox = new JComboBox<>();
+    dateBox.setFont(new Font("Arial",Font.PLAIN,13));
+    
+    // Populate dates for next 7 days
+    for(int i = 0; i < 7; i++) {
+        LocalDate date = LocalDate.now().plusDays(i);
+        dateBox.addItem(date.format(DateTimeFormatter.ofPattern("EEEE, MMMM dd, yyyy")));
+    }
+
     JComboBox<String> tableBoxPopup = new JComboBox<>();
     loadAvailableTables(tableBoxPopup);
     tableBoxPopup.setFont(new Font("Arial",Font.PLAIN,13));
     
     paxField.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
-        public void insertUpdate(javax.swing.event.DocumentEvent e) { updateTables(); }
-        public void removeUpdate(javax.swing.event.DocumentEvent e) { updateTables(); }
-        public void changedUpdate(javax.swing.event.DocumentEvent e) { updateTables(); }
+        public void insertUpdate(javax.swing.event.DocumentEvent e) { updateTablesWithDate(); }
+        public void removeUpdate(javax.swing.event.DocumentEvent e) { updateTablesWithDate(); }
+        public void changedUpdate(javax.swing.event.DocumentEvent e) { updateTablesWithDate(); }
         
-        private void updateTables() {
+        private void updateTablesWithDate() {
             try {
                 int pax = Integer.parseInt(paxField.getText());
-                loadAvailableTablesByPax(tableBoxPopup, pax);
-            } catch(NumberFormatException ex) {
+                String dateStr = (String) dateBox.getSelectedItem();
+                LocalDate selectedDate = LocalDate.parse(dateStr, DateTimeFormatter.ofPattern("EEEE, MMMM dd, yyyy"));
+                loadAvailableTablesByPaxAndDate(tableBoxPopup, pax, selectedDate);
+            } catch(Exception ex) {
                 loadAvailableTables(tableBoxPopup);
             }
+        }
+    });
+    
+    dateBox.addActionListener(ee -> {
+        try {
+            int pax = Integer.parseInt(paxField.getText());
+            String dateStr = (String) dateBox.getSelectedItem();
+            LocalDate selectedDate = LocalDate.parse(dateStr, DateTimeFormatter.ofPattern("EEEE, MMMM dd, yyyy"));
+            loadAvailableTablesByPaxAndDate(tableBoxPopup, pax, selectedDate);
+        } catch(Exception ex) {
+            loadAvailableTables(tableBoxPopup);
         }
     });
 
@@ -301,6 +331,11 @@ public class Dashboard extends JFrame {
     form.add(paxLabel);
     form.add(paxField);
 
+    JLabel dateLabel = new JLabel("Date:");
+    dateLabel.setFont(new Font("Arial",Font.BOLD,12));
+    form.add(dateLabel);
+    form.add(dateBox);
+
     JLabel tableLabel = new JLabel("Table:");
     tableLabel.setFont(new Font("Arial",Font.BOLD,12));
     form.add(tableLabel);
@@ -321,24 +356,38 @@ public class Dashboard extends JFrame {
     if(result == JOptionPane.OK_OPTION){
 
         try{
+            // Parse the selected date
+            String dateStr = (String) dateBox.getSelectedItem();
+            LocalDate walkInDate = LocalDate.parse(dateStr, DateTimeFormatter.ofPattern("EEEE, MMMM dd, yyyy"));
+            
+            String walkinTable = tableBoxPopup.getSelectedItem().toString();
+            String walkinStatus = statusBox.getSelectedItem().toString();
+            
+            // Check if table is reserved on this date
+            if(hasReservationForTable(walkInDate, walkinTable)) {
+                JOptionPane.showMessageDialog(null, "Table " + walkinTable + " has a reservation on " + walkInDate.format(DateTimeFormatter.ofPattern("MMM dd")) + ". Please choose another table.");
+                return;
+            }
 
             Connection conn = Dbconnection.getConnection();
 
-            String sql = "INSERT INTO walkin(name,pax,table_no,status) VALUES(?,?,?,?)";
+            String sql = "INSERT INTO walkin(name,pax,walk_in_date,table_no,status) VALUES(?,?,?,?,?)";
 
             PreparedStatement pst = conn.prepareStatement(sql);
 
             pst.setString(1,nameField.getText());
             pst.setInt(2,Integer.parseInt(paxField.getText()));
-            pst.setString(3,tableBoxPopup.getSelectedItem().toString());
-            pst.setString(4,statusBox.getSelectedItem().toString());
+            pst.setDate(3, java.sql.Date.valueOf(walkInDate));
+            pst.setString(4, walkinTable);
+            pst.setString(5, walkinStatus);
 
             pst.executeUpdate();
 
             loadWalkinData();
+            updateTableFromWalkin(walkinTable, walkinStatus);
             if(tableBox != null){
-    loadAvailableTables(tableBox);
-}
+                loadAvailableTables(tableBox);
+            }
 
         }catch(Exception ex){
             ex.printStackTrace();
@@ -356,14 +405,30 @@ public class Dashboard extends JFrame {
     searchLabel.setFont(new Font("Arial",Font.BOLD,13));
     searchLabel.setForeground(new Color(102,0,32));
     
-    JTextField searchField = new JTextField(25);
+    searchField = new JTextField(15);
     searchField.setFont(new Font("Arial",Font.PLAIN,13));
     searchField.setBorder(BorderFactory.createLineBorder(new Color(102,0,32),1));
-    searchField.setPreferredSize(new Dimension(220,34));
+    searchField.setPreferredSize(new Dimension(150,34));
     searchField.setBackground(new Color(255,255,255));
+
+    JLabel dateFilterLabel = new JLabel("Date:");
+    dateFilterLabel.setFont(new Font("Arial",Font.BOLD,13));
+    dateFilterLabel.setForeground(new Color(102,0,32));
+    
+    dateFilterBox = new JComboBox<>();
+    dateFilterBox.setFont(new Font("Arial",Font.PLAIN,13));
+    dateFilterBox.setPreferredSize(new Dimension(200,34));
+    
+    // Populate dates
+    for(int i = 0; i < 7; i++) {
+        LocalDate date = LocalDate.now().plusDays(i);
+        dateFilterBox.addItem(date.format(DateTimeFormatter.ofPattern("EEEE, MMMM dd")));
+    }
     
     searchPanel.add(searchLabel);
     searchPanel.add(searchField);
+    searchPanel.add(dateFilterLabel);
+    searchPanel.add(dateFilterBox);
 
     topPanel.add(searchPanel, BorderLayout.CENTER);
 
@@ -372,7 +437,7 @@ public class Dashboard extends JFrame {
     topBar.setBorder(BorderFactory.createEmptyBorder(0,30,0,30));
     topBar.add(addWalkinBtn);
 
-    String[] columns = {"ID","Name","Pax","Table","Status","Edit"};
+    String[] columns = {"ID","Name","Pax","Date","Table","Status","Edit"};
 
     DefaultTableModel model = new DefaultTableModel(columns,0);
 
@@ -405,10 +470,12 @@ public class Dashboard extends JFrame {
     
     // Add document listener for search
     searchField.getDocument().addDocumentListener(new javax.swing.event.DocumentListener(){
-        public void insertUpdate(javax.swing.event.DocumentEvent e){ filterTable(searchField.getText()); }
-        public void removeUpdate(javax.swing.event.DocumentEvent e){ filterTable(searchField.getText()); }
-        public void changedUpdate(javax.swing.event.DocumentEvent e){ filterTable(searchField.getText()); }
+        public void insertUpdate(javax.swing.event.DocumentEvent e){ filterWalkinTable(); }
+        public void removeUpdate(javax.swing.event.DocumentEvent e){ filterWalkinTable(); }
+        public void changedUpdate(javax.swing.event.DocumentEvent e){ filterWalkinTable(); }
     });
+
+    dateFilterBox.addActionListener(e -> filterWalkinTable());
 
         // Add the search panel to the top area
         topPanel.add(searchPanel, BorderLayout.NORTH);
@@ -428,13 +495,6 @@ public class Dashboard extends JFrame {
     panel.add(topPanel, BorderLayout.NORTH);
     panel.add(centerWrapper,BorderLayout.CENTER);
 
-    // Search functionality
-    searchField.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
-        public void insertUpdate(javax.swing.event.DocumentEvent e) { filterWalkinTable(searchField.getText()); }
-        public void removeUpdate(javax.swing.event.DocumentEvent e) { filterWalkinTable(searchField.getText()); }
-        public void changedUpdate(javax.swing.event.DocumentEvent e) { filterWalkinTable(searchField.getText()); }
-    });
-
     loadWalkinData();
 
     return panel;
@@ -442,25 +502,400 @@ public class Dashboard extends JFrame {
 
     private JPanel createReservationPage(){
 
-        JPanel panel = new JPanel();
-        panel.setLayout(new BorderLayout());
+        JPanel panel = new JPanel(new BorderLayout());
+        panel.setBackground(new Color(248,247,245));
 
-        JLabel title = new JLabel("Reservations",JLabel.CENTER);
-        title.setFont(new Font("Arial",Font.BOLD,20));
+        JLabel title = new JLabel("Reservation Management",JLabel.CENTER);
+        title.setFont(new Font("Serif",Font.BOLD,32));
+        title.setForeground(new Color(102,0,32));
+        title.setBorder(BorderFactory.createEmptyBorder(20,0,10,0));
 
-        String[] columns = {"Name","Guests","Time","Table"};
-        String[][] data = {
-                {"Michael Tan","4","7:00 PM","T5"},
-                {"Sofia Lim","2","6:30 PM","T2"}
-        };
+        JPanel topPanel = new JPanel(new BorderLayout());
+        topPanel.setBackground(new Color(248,247,245));
+        topPanel.setBorder(BorderFactory.createEmptyBorder(0,30,0,30));
+        topPanel.add(title, BorderLayout.NORTH);
+        
+        addReservationBtn = new JButton("+ Add Reservation");
+        addReservationBtn.setFont(new Font("Arial",Font.BOLD,13));
+        addReservationBtn.setBackground(new Color(102,0,32));
+        addReservationBtn.setForeground(Color.WHITE);
+        addReservationBtn.setFocusPainted(false);
+        addReservationBtn.setBorder(BorderFactory.createEmptyBorder(10,20,10,20));
+        addReservationBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
 
-        JTable table = new JTable(data,columns);
-        JScrollPane scroll = new JScrollPane(table);
+        addReservationBtn.addMouseListener(new java.awt.event.MouseAdapter() {
+            public void mouseEntered(java.awt.event.MouseEvent e) {
+                addReservationBtn.setBackground(new Color(128,0,48));
+            }
+            public void mouseExited(java.awt.event.MouseEvent e) {
+                addReservationBtn.setBackground(new Color(102,0,32));
+            }
+        });
 
-        panel.add(title,BorderLayout.NORTH);
-        panel.add(scroll,BorderLayout.CENTER);
+        addReservationBtn.addActionListener(e -> showAddReservationDialog());
+
+        JPanel topBar = new JPanel(new FlowLayout(FlowLayout.LEFT,15,15));
+        topBar.setBackground(new Color(245,242,235));
+        topBar.setBorder(BorderFactory.createEmptyBorder(0,30,0,30));
+        topBar.add(addReservationBtn);
+        topPanel.add(topBar, BorderLayout.SOUTH);
+
+        // Calendar Panel
+        JPanel calendarPanel = new JPanel(new BorderLayout());
+        calendarPanel.setBackground(Color.WHITE);
+        calendarPanel.setBorder(BorderFactory.createLineBorder(new Color(102,0,32),2));
+
+        // Month/Year selector
+        JPanel monthPanel = new JPanel(new FlowLayout());
+        monthPanel.setBackground(Color.WHITE);
+
+        JButton prevMonth = new JButton("◀");
+        prevMonth.setFont(new Font("Arial",Font.BOLD,16));
+        prevMonth.setBackground(new Color(102,0,32));
+        prevMonth.setForeground(Color.WHITE);
+        prevMonth.setFocusPainted(false);
+        prevMonth.setBorder(BorderFactory.createEmptyBorder(5,10,5,10));
+
+        JButton nextMonth = new JButton("▶");
+        nextMonth.setFont(new Font("Arial",Font.BOLD,16));
+        nextMonth.setBackground(new Color(102,0,32));
+        nextMonth.setForeground(Color.WHITE);
+        nextMonth.setFocusPainted(false);
+        nextMonth.setBorder(BorderFactory.createEmptyBorder(5,10,5,10));
+
+        currentCalendarDate = LocalDate.now();
+        monthYearLabel = new JLabel(currentCalendarDate.format(DateTimeFormatter.ofPattern("MMMM yyyy")), JLabel.CENTER);
+        monthYearLabel.setFont(new Font("Serif",Font.BOLD,18));
+        monthYearLabel.setForeground(new Color(102,0,32));
+
+        monthPanel.add(prevMonth);
+        monthPanel.add(monthYearLabel);
+        monthPanel.add(nextMonth);
+
+        calendarPanel.add(monthPanel, BorderLayout.NORTH);
+
+        // Calendar grid
+        calendarGrid = new JPanel(new GridLayout(0,7));
+        calendarGrid.setBackground(Color.WHITE);
+        updateCalendar();
+
+        calendarPanel.add(calendarGrid, BorderLayout.CENTER);
+
+        // Reservations list for selected date
+        String[] resColumns = {"Time","Name","Guests","Table","Status"};
+        DefaultTableModel resModel = new DefaultTableModel(resColumns,0);
+        reservationsTable = new JTable(resModel);
+        reservationsTable.setRowHeight(30);
+        reservationsTable.setFont(new Font("Arial",Font.PLAIN,12));
+        reservationsTable.setSelectionBackground(new Color(102,0,32));
+        reservationsTable.setSelectionForeground(Color.WHITE);
+        reservationsTable.setGridColor(new Color(230,230,230));
+        reservationsTable.setShowHorizontalLines(true);
+        reservationsTable.setShowVerticalLines(false);
+
+        reservationsTable.getTableHeader().setBackground(new Color(102,0,32));
+        reservationsTable.getTableHeader().setForeground(Color.WHITE);
+        reservationsTable.getTableHeader().setFont(new Font("Serif",Font.BOLD,13));
+        reservationsTable.getTableHeader().setPreferredSize(new Dimension(0,35));
+
+        JScrollPane resScroll = new JScrollPane(reservationsTable);
+        resScroll.setBorder(BorderFactory.createLineBorder(new Color(102,0,32),1));
+
+        JPanel reservationsPanel = new JPanel(new BorderLayout());
+        reservationsPanel.setBackground(Color.WHITE);
+        reservationsPanel.add(resScroll, BorderLayout.CENTER);
+
+        availabilityLabel = new JLabel("Available tables: ");
+        availabilityLabel.setFont(new Font("Arial",Font.BOLD,12));
+        availabilityLabel.setBorder(BorderFactory.createEmptyBorder(10,10,10,10));
+        reservationsPanel.add(availabilityLabel, BorderLayout.SOUTH);
+
+        // Add action listeners
+        prevMonth.addActionListener(e -> {
+            currentCalendarDate = currentCalendarDate.minusMonths(1);
+            updateCalendar();
+        });
+
+        nextMonth.addActionListener(e -> {
+            currentCalendarDate = currentCalendarDate.plusMonths(1);
+            updateCalendar();
+        });
+
+        // Main content
+        JPanel centerWrapper = new JPanel(new GridBagLayout());
+        centerWrapper.setBackground(new Color(245,242,235));
+        centerWrapper.setBorder(BorderFactory.createEmptyBorder(20,30,30,30));
+
+        JPanel content = new JPanel(new GridLayout(1,2,20,0));
+        content.setBackground(new Color(245,242,235));
+        content.add(calendarPanel);
+        content.add(reservationsPanel);
+
+        centerWrapper.add(content, new GridBagConstraints());
+
+        panel.add(topPanel, BorderLayout.NORTH);
+        panel.add(centerWrapper,BorderLayout.CENTER);
+
+        selectReservationDate(LocalDate.now());
 
         return panel;
+    }
+
+    private void updateCalendar() {
+        calendarGrid.removeAll();
+        
+        monthYearLabel.setText(currentCalendarDate.format(DateTimeFormatter.ofPattern("MMMM yyyy")));
+        
+        // Day headers
+        String[] days = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+        for(String day : days) {
+            JLabel dayLabel = new JLabel(day, JLabel.CENTER);
+            dayLabel.setFont(new Font("Arial", Font.BOLD, 12));
+            dayLabel.setForeground(new Color(102,0,32));
+            dayLabel.setBorder(BorderFactory.createEmptyBorder(10,0,10,0));
+            calendarGrid.add(dayLabel);
+        }
+        
+        // Get first day of month and last day
+        LocalDate firstOfMonth = currentCalendarDate.withDayOfMonth(1);
+        LocalDate lastOfMonth = currentCalendarDate.withDayOfMonth(currentCalendarDate.lengthOfMonth());
+        
+        // Start from Sunday of the week containing first of month
+        LocalDate startDate = firstOfMonth.minusDays(firstOfMonth.getDayOfWeek().getValue() % 7);
+        
+        for(int i = 0; i < 42; i++) { // 6 weeks * 7 days
+            LocalDate date = startDate.plusDays(i);
+            JButton dayButton = new JButton(String.valueOf(date.getDayOfMonth()));
+            dayButton.setFont(new Font("Arial", Font.PLAIN, 12));
+            dayButton.setFocusPainted(false);
+            dayButton.setBorder(BorderFactory.createLineBorder(Color.LIGHT_GRAY, 1));
+            
+            if(date.getMonth() != currentCalendarDate.getMonth()) {
+                dayButton.setForeground(Color.GRAY);
+                dayButton.setEnabled(false);
+            } else if(date.equals(LocalDate.now())) {
+                dayButton.setBackground(new Color(102,0,32));
+                dayButton.setForeground(Color.WHITE);
+                LocalDate selectedDate = date;
+                dayButton.addActionListener(e -> {
+                    selectReservationDate(selectedDate);
+                });
+            } else if(date.isBefore(LocalDate.now())) {
+                dayButton.setEnabled(false);
+                dayButton.setForeground(Color.GRAY);
+            } else {
+                dayButton.setBackground(Color.WHITE);
+                LocalDate selectedDate = date;
+                dayButton.addActionListener(e -> {
+                    selectReservationDate(selectedDate);
+                });
+            }
+            
+            calendarGrid.add(dayButton);
+        }
+        
+        calendarGrid.revalidate();
+        calendarGrid.repaint();
+    }
+
+    private JLabel availabilityLabel;
+
+    private void selectReservationDate(LocalDate date) {
+        loadReservationsForDate(date);
+        updateAvailabilityLabel(date);
+    }
+
+    private void updateAvailabilityLabel(LocalDate date) {
+        selectedReservationDate = date;
+        java.util.List<String> available = getAvailableTablesForDate(date);
+        if(available.isEmpty()) {
+            availabilityLabel.setText("Fully booked for " + date.format(DateTimeFormatter.ofPattern("MMM dd, yyyy")));
+            if(addReservationBtn != null) {
+                addReservationBtn.setEnabled(false);
+            }
+        } else {
+            availabilityLabel.setText("Available tables: " + String.join(", ", available));
+            if(addReservationBtn != null) {
+                addReservationBtn.setEnabled(true);
+            }
+        }
+    }
+
+    private java.util.List<String> getAvailableTablesForDate(LocalDate date) {
+        java.util.List<String> available = new java.util.ArrayList<>();
+        try {
+            Connection conn = Dbconnection.getConnection();
+            String sql = "SELECT table_no FROM reservations WHERE DATE(reservation_date)=? AND status!='Cancelled'";
+            PreparedStatement pst = conn.prepareStatement(sql);
+            pst.setDate(1, java.sql.Date.valueOf(date));
+            ResultSet rs = pst.executeQuery();
+            java.util.Set<String> occupied = new java.util.HashSet<>();
+            while(rs.next()) {
+                occupied.add(rs.getString("table_no"));
+            }
+            for(int i = 1; i <= 14; i++) {
+                String table = "T" + i;
+                if(!occupied.contains(table)) {
+                    available.add(table);
+                }
+            }
+        } catch(Exception e) {
+            e.printStackTrace();
+        }
+        return available;
+    }
+
+    private void loadReservationsForDate(LocalDate date) {
+        try {
+            DefaultTableModel model = (DefaultTableModel) reservationsTable.getModel();
+            model.setRowCount(0);
+            
+            Connection conn = Dbconnection.getConnection();
+            String sql = "SELECT reservation_time, customer_name, guests, table_no, status FROM reservations WHERE DATE(reservation_date) = ? ORDER BY reservation_time";
+            PreparedStatement pst = conn.prepareStatement(sql);
+            pst.setDate(1, java.sql.Date.valueOf(date));
+            ResultSet rs = pst.executeQuery();
+            
+            while(rs.next()) {
+                model.addRow(new Object[]{
+                    rs.getString("reservation_time"),
+                    rs.getString("customer_name"),
+                    rs.getInt("guests"),
+                    rs.getString("table_no"),
+                    rs.getString("status")
+                });
+            }
+        } catch(Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void showAddReservationDialog() {
+        JTextField nameField = new JTextField();
+        nameField.setFont(new Font("Arial",Font.PLAIN,13));
+        
+        JTextField guestsField = new JTextField();
+        guestsField.setFont(new Font("Arial",Font.PLAIN,13));
+        
+        String[] timeSlots = new String[] {
+            "10:00 AM - 1:00 PM",
+            "1:00 PM - 4:00 PM", 
+            "4:00 PM - 7:00 PM",
+            "7:00 PM - 10:00 PM"};
+
+        JComboBox<String> timeBox = new JComboBox<>(timeSlots);
+        timeBox.setFont(new Font("Arial",Font.PLAIN,13));
+
+        JComboBox<String> dateBox = new JComboBox<>();
+        dateBox.setFont(new Font("Arial",Font.PLAIN,13));
+        
+        // Populate dates for next 7 days
+        for(int i = 0; i < 7; i++) {
+            LocalDate date = LocalDate.now().plusDays(i);
+            dateBox.addItem(date.format(DateTimeFormatter.ofPattern("EEEE, MMMM dd, yyyy")));
+        }
+        
+        JComboBox<String> tableBoxPopup = new JComboBox<>();
+        loadAvailableTables(tableBoxPopup);
+        tableBoxPopup.setFont(new Font("Arial",Font.PLAIN,13));
+        
+        // Update available tables based on pax/date/time
+        Runnable updateTables = () -> {
+            try {
+                int guests = Integer.parseInt(guestsField.getText());
+                String dateStr = (String) dateBox.getSelectedItem();
+                LocalDate walkinDate = LocalDate.parse(dateStr, DateTimeFormatter.ofPattern("EEEE, MMMM dd, yyyy"));
+                String time = (String) timeBox.getSelectedItem();
+                loadAvailableTablesByPaxAndDateTime(tableBoxPopup, guests, walkinDate, time);
+            } catch(Exception ex) {
+                loadAvailableTables(tableBoxPopup);
+            }
+        };
+
+        guestsField.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
+            public void insertUpdate(javax.swing.event.DocumentEvent e) { updateTables.run(); }
+            public void removeUpdate(javax.swing.event.DocumentEvent e) { updateTables.run(); }
+            public void changedUpdate(javax.swing.event.DocumentEvent e) { updateTables.run(); }
+        });
+
+        dateBox.addActionListener(e -> updateTables.run());
+        timeBox.addActionListener(e -> updateTables.run());
+        
+        JPanel form = new JPanel(new GridLayout(0,1,10,10));
+        form.setBorder(BorderFactory.createEmptyBorder(15,15,15,15));
+        form.setBackground(Color.WHITE);
+        
+        form.add(new JLabel("Customer Name:"));
+        form.add(nameField);
+        form.add(new JLabel("Number of Guests:"));
+        form.add(guestsField);
+        form.add(new JLabel("Reservation Date:"));
+        form.add(dateBox);
+        form.add(new JLabel("Time:"));
+        form.add(timeBox);
+        form.add(new JLabel("Table:"));
+        form.add(tableBoxPopup);
+        
+        int result = JOptionPane.showConfirmDialog(
+            null,
+            form,
+            "Add Reservation",
+            JOptionPane.OK_CANCEL_OPTION
+        );
+        
+        if(result == JOptionPane.OK_OPTION) {
+            try {
+                Connection conn = Dbconnection.getConnection();
+                String sql = "INSERT INTO reservations(customer_name, guests, reservation_date, reservation_time, table_no, status) VALUES(?,?,?,?,?,'Confirmed')";
+                PreparedStatement pst = conn.prepareStatement(sql);
+                pst.setString(1, nameField.getText());
+                pst.setInt(2, Integer.parseInt(guestsField.getText()));
+                
+                // Parse the selected date
+                String dateStr = (String) dateBox.getSelectedItem();
+                LocalDate resDate = LocalDate.parse(dateStr, DateTimeFormatter.ofPattern("EEEE, MMMM dd, yyyy"));
+                
+                pst.setDate(3, java.sql.Date.valueOf(resDate));
+
+                String selectedTable = tableBoxPopup.getSelectedItem().toString();
+                String selectedTime = (String) timeBox.getSelectedItem();
+
+                if(isTableBooked(resDate, selectedTime, selectedTable)) {
+                    JOptionPane.showMessageDialog(null, "Table " + selectedTable + " is already booked at " + selectedTime + ". Please choose another time or table.");
+                    return;
+                }
+
+                pst.setString(4, selectedTime);
+                pst.setString(5, selectedTable);
+                pst.executeUpdate();
+                
+                JOptionPane.showMessageDialog(null, "Reservation added successfully!");
+                loadReservationsForDate(resDate);
+                updateTableFromWalkin(selectedTable, "Reserved");
+                updateAvailabilityLabel(resDate);
+            } catch(Exception e) {
+                e.printStackTrace();
+                JOptionPane.showMessageDialog(null, "Error adding reservation!\n" + e.getMessage());
+            }
+        }
+    }
+
+    private boolean isTableBooked(LocalDate date, String time, String tableNo) {
+        try {
+            Connection conn = Dbconnection.getConnection();
+            String sql = "SELECT COUNT(*) FROM reservations WHERE DATE(reservation_date) = ? AND reservation_time = ? AND table_no = ? AND status != 'Cancelled'";
+            PreparedStatement pst = conn.prepareStatement(sql);
+            pst.setDate(1, java.sql.Date.valueOf(date));
+            pst.setString(2, time);
+            pst.setString(3, tableNo);
+            ResultSet rs = pst.executeQuery();
+            if(rs.next()) {
+                return rs.getInt(1) > 0;
+            }
+        } catch(Exception e) {
+            e.printStackTrace();
+        }
+        return false;
     }
 
     private JLabel createCounter(String name,Color color,int x){
@@ -738,7 +1173,7 @@ class ButtonEditor extends DefaultCellEditor {
         ex.printStackTrace();
     }
 
-    String tableNo = table.getValueAt(row,3).toString();
+    String tableNo = table.getValueAt(row,4).toString();
 
     updateTableFromWalkin(tableNo,status);
 
@@ -767,7 +1202,7 @@ class ButtonEditor extends DefaultCellEditor {
 
         Connection conn = Dbconnection.getConnection();
 
-        String sql = "SELECT * FROM walkin";
+        String sql = "SELECT * FROM walkin ORDER BY walk_in_date DESC, id DESC";
 
         PreparedStatement pst = conn.prepareStatement(sql);
 
@@ -781,6 +1216,7 @@ class ButtonEditor extends DefaultCellEditor {
 
             String name = rs.getString("name");
             int pax = rs.getInt("pax");
+            LocalDate walkInDate = rs.getDate("walk_in_date").toLocalDate();
             String tableNo = rs.getString("table_no");
             String status = rs.getString("status");
 
@@ -788,6 +1224,7 @@ class ButtonEditor extends DefaultCellEditor {
             rs.getInt("id"),
             name,
             pax,
+            walkInDate.format(DateTimeFormatter.ofPattern("MMM dd, yyyy")),
             tableNo,
             status,
             "Edit"
@@ -801,23 +1238,39 @@ class ButtonEditor extends DefaultCellEditor {
     }
 }
 
-    private void filterWalkinTable(String query){
+    private void filterWalkinTable(){
         DefaultTableModel model = (DefaultTableModel) walkinTable.getModel();
-        String searchText = (query == null ? "" : query.toLowerCase().trim());
-
-        // Reload all walk-in data and then filter
+        model.setRowCount(0);
+        
         loadWalkinData();
-
-        if(searchText.isEmpty()) return;
+        
+        String searchText = ""; // searchField.getText().toLowerCase().trim();
+        if(searchField != null) {
+            searchText = searchField.getText().toLowerCase().trim();
+        }
+        
+        String selectedDate = "";
+        if(dateFilterBox != null) {
+            selectedDate = (String) dateFilterBox.getSelectedItem();
+        }
 
         for(int i = model.getRowCount() - 1; i >= 0; i--){
-            String name = model.getValueAt(i, 1).toString().toLowerCase();
-            String table = model.getValueAt(i, 3).toString().toLowerCase();
-            String status = model.getValueAt(i, 4).toString().toLowerCase();
+            boolean matchesSearch = true;
+            boolean matchesDate = true;
+            
+            if(!searchText.isEmpty()) {
+                String name = model.getValueAt(i, 1).toString().toLowerCase();
+                String table = model.getValueAt(i, 4).toString().toLowerCase();
+                String status = model.getValueAt(i, 5).toString().toLowerCase();
+                matchesSearch = name.contains(searchText) || table.contains(searchText) || status.contains(searchText);
+            }
+            
+            if(selectedDate != null && !selectedDate.isEmpty()) {
+                String date = model.getValueAt(i, 3).toString();
+                matchesDate = date.contains(selectedDate.split(",")[0]); // Match month and day
+            }
 
-            if(!name.contains(searchText)
-                    && !table.contains(searchText)
-                    && !status.contains(searchText)){
+            if(!matchesSearch || !matchesDate){
                 model.removeRow(i);
             }
         }
@@ -865,6 +1318,14 @@ class ButtonEditor extends DefaultCellEditor {
 }
 
 private void loadAvailableTablesByPax(JComboBox<String> tableBox, int pax){
+    loadAvailableTablesByPaxAndDateTime(tableBox, pax, LocalDate.now(), null);
+}
+
+private void loadAvailableTablesByPaxAndDate(JComboBox<String> tableBox, int pax, LocalDate date) {
+    loadAvailableTablesByPaxAndDateTime(tableBox, pax, date, null);
+}
+
+private void loadAvailableTablesByPaxAndDateTime(JComboBox<String> tableBox, int pax, LocalDate date, String time){
 
     if(tableBox == null){
         return;
@@ -874,16 +1335,29 @@ private void loadAvailableTablesByPax(JComboBox<String> tableBox, int pax){
 
         Connection conn = Dbconnection.getConnection();
 
-        String sql = "SELECT table_no FROM walkin WHERE status!='Done'";
-
-        PreparedStatement pst = conn.prepareStatement(sql);
-
-        ResultSet rs = pst.executeQuery();
+        // Get walk-ins for the selected date
+        String walkinSql = "SELECT table_no FROM walkin WHERE DATE(walk_in_date) = ? AND status != 'Done'";
+        PreparedStatement walkinPst = conn.prepareStatement(walkinSql);
+        walkinPst.setDate(1, java.sql.Date.valueOf(date));
+        ResultSet walkinRs = walkinPst.executeQuery();
 
         ArrayList<String> occupied = new ArrayList<>();
 
-        while(rs.next()){
-            occupied.add(rs.getString("table_no"));
+        while(walkinRs.next()){
+            occupied.add(walkinRs.getString("table_no"));
+        }
+        
+        // Get reservations for the selected date (and time if provided)
+        String resSql = "SELECT table_no FROM reservations WHERE DATE(reservation_date) = ? AND status != 'Cancelled'" + (time != null ? " AND reservation_time = ?" : "");
+        PreparedStatement resPst = conn.prepareStatement(resSql);
+        resPst.setDate(1, java.sql.Date.valueOf(date));
+        if(time != null) {
+            resPst.setString(2, time);
+        }
+        ResultSet resRs = resPst.executeQuery();
+
+        while(resRs.next()){
+            occupied.add(resRs.getString("table_no"));
         }
 
         tableBox.removeAllItems();
@@ -919,37 +1393,7 @@ private void loadAvailableTablesByPax(JComboBox<String> tableBox, int pax){
 }
 
 private void filterTable(String query) {
-    DefaultTableModel model = (DefaultTableModel) walkinTable.getModel();
-    
-    try {
-        Connection conn = Dbconnection.getConnection();
-        String sql = "SELECT * FROM walkin WHERE name LIKE ? ORDER BY id DESC";
-        PreparedStatement pst = conn.prepareStatement(sql);
-        pst.setString(1, "%" + query + "%");
-        ResultSet rs = pst.executeQuery();
-        
-        model.setRowCount(0);
-        
-        while(rs.next()){
-            String name = rs.getString("name");
-            int pax = rs.getInt("pax");
-            String tableNo = rs.getString("table_no");
-            String status = rs.getString("status");
-
-            model.addRow(new Object[]{
-                rs.getInt("id"),
-                name,
-                pax,
-                tableNo,
-                status,
-                "Edit"
-            });
-
-            updateTableFromWalkin(tableNo, status);
-        }
-    } catch(Exception e) {
-        e.printStackTrace();
-    }
+    filterWalkinTable();
 }
 
     public static void main(String[] args){
