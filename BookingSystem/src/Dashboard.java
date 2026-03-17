@@ -35,7 +35,7 @@ public class Dashboard extends JFrame {
     private ArrayList<Rectangle> originalBounds = new ArrayList<>();
     private ArrayList<Integer> tableStatus = new ArrayList<>();
 
-    private int sidebarWidth = 120;
+    private int sidebarWidth = 150;
     private int headerHeight = 70;
 
     private int baseWidth = 780;
@@ -96,7 +96,7 @@ public class Dashboard extends JFrame {
 
         sidebar = new JPanel();
         sidebar.setLayout(null);
-        sidebar.setBackground(new Color(30,30,30));
+        sidebar.setBackground(new Color(51,51,51));
         sidebar.setBounds(0,0,sidebarWidth,getHeight());
 
         JLabel title = new JLabel("Crimson Oak");
@@ -110,33 +110,27 @@ public class Dashboard extends JFrame {
         sub.setBounds(10,40,100,20);
 
         JButton tablesBtn = new JButton("Tables");
-        tablesBtn.setBounds(10,120,100,40);
+        tablesBtn.setBounds(10,120,130,40);
 
         JButton listBtn = new JButton("List");
-        listBtn.setBounds(10,180,100,40);
+        listBtn.setBounds(10,180,130,40);
 
         JButton reserveBtn = new JButton("RSV");
-        reserveBtn.setBounds(10,240,100,40);
+        reserveBtn.setBounds(10,240,130,40);
 
         JButton logoutBtn = new JButton("Logout");
-        logoutBtn.setBounds(10,480,100,40);
+        logoutBtn.setBounds(10,480,130,40);
 
         // Sidebar button style
         JButton[] navButtons = {tablesBtn, listBtn, reserveBtn, logoutBtn};
+        Color burgundy = new Color(128,0,32);
+        Color ivory = new Color(255,255,240);
         for(JButton btn : navButtons){
-            btn.setBackground(new Color(40,40,40));
-            btn.setForeground(Color.WHITE);
+            btn.setBackground(ivory);
+            btn.setForeground(Color.BLACK);
             btn.setFocusPainted(false);
-            btn.setBorder(BorderFactory.createEmptyBorder(5,10,5,10));
+            btn.setBorder(BorderFactory.createLineBorder(burgundy, 2));
             btn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-            btn.addMouseListener(new java.awt.event.MouseAdapter(){
-                public void mouseEntered(java.awt.event.MouseEvent e){
-                    btn.setBackground(new Color(60,0,32));
-                }
-                public void mouseExited(java.awt.event.MouseEvent e){
-                    btn.setBackground(new Color(40,40,40));
-                }
-            });
         }
 
         // Navigation actions
