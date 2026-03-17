@@ -3,7 +3,12 @@ import java.awt.*;
 import java.util.ArrayList;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
-
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import javax.swing.table.DefaultTableModel;
+import java.awt.event.ComponentAdapter;
+import java.awt.event.ComponentEvent;
 public class Dashboard extends JFrame {
 
     private JPanel sidebar;
@@ -20,6 +25,8 @@ public class Dashboard extends JFrame {
     private JPanel tablesPage;
     private JPanel listPage;
     private JPanel reservationPage;
+    private JTable walkinTable;
+    private JComboBox<String> tableBox;
 
     // tables system
     private JPanel floorPanel;
@@ -88,7 +95,7 @@ public class Dashboard extends JFrame {
 
         sidebar = new JPanel();
         sidebar.setLayout(null);
-        sidebar.setBackground(new Color(40,40,40));
+        sidebar.setBackground(new Color(30,30,30));
         sidebar.setBounds(0,0,sidebarWidth,getHeight());
 
         JLabel title = new JLabel("Crimson Oak");
@@ -132,7 +139,7 @@ public class Dashboard extends JFrame {
 
         header = new JPanel();
         header.setLayout(null);
-        header.setBackground(new Color(180,150,70));
+        header.setBackground(new Color(196,164,100)); // champagne gold
         header.setBounds(sidebarWidth,0,getWidth()-sidebarWidth,headerHeight);
 
         DateTimeFormatter format =
@@ -145,7 +152,7 @@ public class Dashboard extends JFrame {
         date.setBounds(30,20,250,30);
 
         reservedLabel = createCounter("Reserved",Color.GREEN,300);
-        seatedLabel = createCounter("Seated",Color.RED,450);
+        seatedLabel = createCounter("Seated",new Color(128,0,32),450);
         emptyLabel = createCounter("Empty",Color.LIGHT_GRAY,600);
 
         header.add(date);
@@ -161,14 +168,19 @@ public class Dashboard extends JFrame {
         floorPanel = new JPanel(){
             protected void paintComponent(Graphics g){
                 super.paintComponent(g);
-                g.setColor(new Color(190,165,90));
+                g.setColor(new Color(214,193,146)); // warm gold floor
                 g.fillRect(0,0,getWidth(),getHeight());
             }
         };
 
         floorPanel.setLayout(null);
+        floorPanel.addComponentListener(new ComponentAdapter(){
+         public void componentResized(ComponentEvent e){
+        resizeTables();
+    }
+});
 
-        addFamilyTable(floorPanel,"Table 1",80,100,Color.GREEN);
+        addFamilyTable(floorPanel,"Table 1",80,100,Color.LIGHT_GRAY);
         addFamilyTable(floorPanel,"Table 2",80,250,Color.LIGHT_GRAY);
 
         addTable(floorPanel,"Table 3",250,100,Color.LIGHT_GRAY);
@@ -176,11 +188,11 @@ public class Dashboard extends JFrame {
         addTable(floorPanel,"Table 5",250,300,Color.LIGHT_GRAY);
 
         addTable(floorPanel,"Table 6",400,100,Color.LIGHT_GRAY);
-        addTable(floorPanel,"Table 7",400,200,Color.RED);
+        addTable(floorPanel,"Table 7",400,200,Color.LIGHT_GRAY);
         addTable(floorPanel,"Table 8",400,300,Color.LIGHT_GRAY);
 
         addTable(floorPanel,"Table 9",550,100,Color.LIGHT_GRAY);
-        addTable(floorPanel,"Table 10",550,200,Color.RED);
+        addTable(floorPanel,"Table 10",550,200,Color.LIGHT_GRAY);
         addTable(floorPanel,"Table 11",550,300,Color.LIGHT_GRAY);
 
         addRoundTable(floorPanel,"Table 12",650,100,Color.LIGHT_GRAY);
@@ -192,28 +204,123 @@ public class Dashboard extends JFrame {
 
     private JPanel createListPage(){
 
-    JPanel panel = new JPanel();
-    panel.setLayout(new BorderLayout());
+    JPanel panel = new JPanel(new BorderLayout());
+    panel.setBackground(new Color(214,193,146));
 
     JLabel title = new JLabel("Walk-in List",JLabel.CENTER);
+    JButton addWalkinBtn = new JButton("+ Add Walk-in Customer");
+    addWalkinBtn.addActionListener(e -> {
+
+    JTextField nameField = new JTextField();
+    JTextField paxField = new JTextField();
+
+    JComboBox<String> tableBoxPopup = new JComboBox<>();
+    loadAvailableTables(tableBoxPopup);
+
+    String[] status = {"Waiting","Seated"};
+    JComboBox<String> statusBox = new JComboBox<>(status);
+
+    JPanel form = new JPanel(new GridLayout(0,1));
+
+    form.add(new JLabel("Name"));
+    form.add(nameField);
+
+    form.add(new JLabel("Pax"));
+    form.add(paxField);
+
+    form.add(new JLabel("Table"));
+    form.add(tableBoxPopup);
+
+    form.add(new JLabel("Status"));
+    form.add(statusBox);
+
+    int result = JOptionPane.showConfirmDialog(
+            null,
+            form,
+            "Add Walk-in Customer",
+            JOptionPane.OK_CANCEL_OPTION
+    );
+
+    if(result == JOptionPane.OK_OPTION){
+
+        try{
+
+            Connection conn = Dbconnection.getConnection();
+
+            String sql = "INSERT INTO walkin(name,pax,table_no,status) VALUES(?,?,?,?)";
+
+            PreparedStatement pst = conn.prepareStatement(sql);
+
+            pst.setString(1,nameField.getText());
+            pst.setInt(2,Integer.parseInt(paxField.getText()));
+            pst.setString(3,tableBoxPopup.getSelectedItem().toString());
+            pst.setString(4,statusBox.getSelectedItem().toString());
+
+            pst.executeUpdate();
+
+            loadWalkinData();
+            if(tableBox != null){
+    loadAvailableTables(tableBox);
+}
+
+        }catch(Exception ex){
+            ex.printStackTrace();
+        }
+
+    }
+
+});
+
+    JPanel topBar = new JPanel(new FlowLayout(FlowLayout.LEFT));
+    topBar.setBorder(BorderFactory.createEmptyBorder(10,40,10,40));
+    topBar.add(addWalkinBtn);
     title.setFont(new Font("Arial",Font.BOLD,20));
 
-    String[] columns = {"Name","Pax","Table","Status","Edit"};
+    String[] columns = {"ID","Name","Pax","Table","Status","Edit"};
 
-    Object[][] data = {
-            {"Juan Dela Cruz","4","T3","Waiting","Edit"},
-            {"Maria Santos","2","T1","Seated","Edit"}
-    };
+    DefaultTableModel model = new DefaultTableModel(columns,0);
 
-    JTable table = new JTable(data,columns);
+    walkinTable = new JTable(model);
+    walkinTable.getColumnModel().getColumn(0).setMinWidth(0);
+    walkinTable.getColumnModel().getColumn(0).setMaxWidth(0);
+    walkinTable.getColumnModel().getColumn(0).setWidth(0);
 
-    table.getColumn("Edit").setCellRenderer(new ButtonRenderer());
-    table.getColumn("Edit").setCellEditor(new ButtonEditor(new JCheckBox(),table));
+    walkinTable.setRowHeight(28);
+    walkinTable.setAutoResizeMode(JTable.AUTO_RESIZE_ALL_COLUMNS);
+    walkinTable.setFillsViewportHeight(true);
 
-    JScrollPane scroll = new JScrollPane(table);
+    walkinTable.getColumn("Edit").setCellRenderer(new ButtonRenderer());
+    walkinTable.getColumn("Edit").setCellEditor(new ButtonEditor(new JCheckBox(),walkinTable));
 
-    panel.add(title,BorderLayout.NORTH);
-    panel.add(scroll,BorderLayout.CENTER);
+    walkinTable.setShowHorizontalLines(false);
+    walkinTable.setGridColor(new Color(214,193,146));
+    walkinTable.getTableHeader().setFont(new Font("Serif",Font.BOLD,14));
+
+    JScrollPane scroll = new JScrollPane(walkinTable);
+    scroll.setBorder(BorderFactory.createEmptyBorder(20,40,40,40));
+
+    JPanel topPanel = new JPanel(new BorderLayout());
+
+    panel.add(topPanel,BorderLayout.NORTH);
+
+    JPanel centerWrapper = new JPanel(new GridBagLayout());
+    centerWrapper.setBackground(new Color(214,193,146));
+
+    JPanel content = new JPanel(new BorderLayout(10,20));
+    content.setMaximumSize(new Dimension(900,500));
+    content.setMinimumSize(new Dimension(600,300));
+
+    topPanel.add(title,BorderLayout.NORTH);
+    topPanel.add(topBar,BorderLayout.SOUTH);
+    content.add(scroll,BorderLayout.CENTER);
+
+    centerWrapper.add(content, new GridBagConstraints());
+
+    panel.add(centerWrapper,BorderLayout.CENTER);
+
+
+
+    loadWalkinData();
 
     return panel;
 }
@@ -269,23 +376,35 @@ public class Dashboard extends JFrame {
         seatedLabel.setText("Seated "+seated);
     }
 
-    private void resizeTables(){
+    private void resizeTables() {
 
-        double scaleX = floorPanel.getWidth()/(double)baseWidth;
-        double scaleY = floorPanel.getHeight()/(double)baseHeight;
+    if(floorPanel.getWidth() == 0 || floorPanel.getHeight() == 0) return;
 
-        for(int i=0;i<tables.size();i++){
+    double scaleX = floorPanel.getWidth() / (double) baseWidth;
+    double scaleY = floorPanel.getHeight() / (double) baseHeight;
 
-            Rectangle r = originalBounds.get(i);
+    double scale = Math.min(scaleX, scaleY);
 
-            int x=(int)(r.x*scaleX);
-            int y=(int)(r.y*scaleY);
-            int w=(int)(r.width*scaleX);
-            int h=(int)(r.height*scaleY);
+    int newWidth = (int)(baseWidth * scale);
+    int newHeight = (int)(baseHeight * scale);
 
-            tables.get(i).setBounds(x,y,w,h);
-        }
+    int offsetX = (floorPanel.getWidth() - newWidth) / 2;
+    int offsetY = (floorPanel.getHeight() - newHeight) / 2;
+
+    for(int i = 0; i < tables.size(); i++){
+
+        Rectangle r = originalBounds.get(i);
+
+        int x = (int)(r.x * scale) + offsetX;
+        int y = (int)(r.y * scale) + offsetY;
+        int w = (int)(r.width * scale);
+        int h = (int)(r.height * scale);
+
+        tables.get(i).setBounds(x,y,w,h);
     }
+
+    floorPanel.repaint();
+}
 
     private void showStatusMenu(JPanel table,int index,int x,int y){
 
@@ -336,19 +455,25 @@ public class Dashboard extends JFrame {
 
         JLabel label=new JLabel(name,JLabel.CENTER);
         label.setForeground(Color.WHITE);
-        label.setFont(new Font("Arial",Font.BOLD,12));
+        label.setFont(new Font("Serif",Font.BOLD,13));
 
         table.add(label,BorderLayout.SOUTH);
 
         int index=tables.size();
 
-        table.addMouseListener(new java.awt.event.MouseAdapter(){
-            public void mouseClicked(java.awt.event.MouseEvent e){
-                showStatusMenu(table,index,e.getX(),e.getY());
-            }
-        });
-
         panel.add(table);
+
+        table.addMouseListener(new java.awt.event.MouseAdapter(){
+
+    public void mouseEntered(java.awt.event.MouseEvent e){
+        table.setBorder(BorderFactory.createLineBorder(new Color(196,164,100),3));
+    }
+
+    public void mouseExited(java.awt.event.MouseEvent e){
+        table.setBorder(BorderFactory.createLineBorder(new Color(80,80,80),2));
+    }
+
+});
 
         tables.add(table);
         tableStatus.add(detectStatus(color));
@@ -377,11 +502,7 @@ public class Dashboard extends JFrame {
 
         int index=tables.size();
 
-        table.addMouseListener(new java.awt.event.MouseAdapter(){
-            public void mouseClicked(java.awt.event.MouseEvent e){
-                showStatusMenu(table,index,e.getX(),e.getY());
-            }
-        });
+        
 
         panel.add(table);
 
@@ -412,12 +533,6 @@ public class Dashboard extends JFrame {
         table.add(label,BorderLayout.CENTER);
 
         int index=tables.size();
-
-        table.addMouseListener(new java.awt.event.MouseAdapter(){
-            public void mouseClicked(java.awt.event.MouseEvent e){
-                showStatusMenu(table,index,e.getX(),e.getY());
-            }
-        });
 
         panel.add(table);
 
@@ -454,7 +569,7 @@ class ButtonEditor extends DefaultCellEditor {
         button=new JButton("Edit");
 
         button.addActionListener(e->{
-
+            fireEditingStopped();
             String[] options={"Waiting","Seated","Done"};
 
             String status=(String)JOptionPane.showInputDialog(
@@ -467,8 +582,43 @@ class ButtonEditor extends DefaultCellEditor {
                     options[0]);
 
             if(status!=null){
-                table.setValueAt(status,row,3);
-            }
+
+    try{
+
+        Connection conn = Dbconnection.getConnection();
+
+        int id = Integer.parseInt(table.getValueAt(row,0).toString());
+
+        if(status.equals("Done")){
+
+            String sql = "DELETE FROM walkin WHERE id=?";
+
+            PreparedStatement pst = conn.prepareStatement(sql);
+            pst.setInt(1,id);
+            pst.executeUpdate();
+
+        }else{
+
+            String sql = "UPDATE walkin SET status=? WHERE id=?";
+
+            PreparedStatement pst = conn.prepareStatement(sql);
+            pst.setString(1,status);
+            pst.setInt(2,id);
+            pst.executeUpdate();
+
+        }
+
+    }catch(Exception ex){
+        ex.printStackTrace();
+    }
+
+    String tableNo = table.getValueAt(row,3).toString();
+
+    updateTableFromWalkin(tableNo,status);
+
+    loadWalkinData();
+    loadAvailableTables(tableBox);
+}
         });
     }
 
@@ -485,7 +635,114 @@ class ButtonEditor extends DefaultCellEditor {
     }
 }
 
+    private void loadWalkinData(){
+
+    try{
+
+        Connection conn = Dbconnection.getConnection();
+
+        String sql = "SELECT * FROM walkin";
+
+        PreparedStatement pst = conn.prepareStatement(sql);
+
+        ResultSet rs = pst.executeQuery();
+
+        DefaultTableModel model = (DefaultTableModel) walkinTable.getModel();
+
+        model.setRowCount(0);
+
+        while(rs.next()){
+
+            String name = rs.getString("name");
+            int pax = rs.getInt("pax");
+            String tableNo = rs.getString("table_no");
+            String status = rs.getString("status");
+
+            model.addRow(new Object[]{
+            rs.getInt("id"),
+            name,
+            pax,
+            tableNo,
+            status,
+            "Edit"
+                });
+
+            updateTableFromWalkin(tableNo,status);
+        }
+
+    }catch(Exception e){
+        e.printStackTrace();
+    }
+}
+
+   private void updateTableFromWalkin(String tableNo,String status){
+
+    int index = Integer.parseInt(tableNo.replace("T","")) - 1;
+
+    if(index >=0 && index < tables.size()){
+
+        JPanel table = tables.get(index);
+
+        if(status.equals("Seated")){
+            table.setBackground(new Color(102,0,0)); // wine red
+            tableStatus.set(index,2);
+        }
+
+        if(status.equals("Waiting")){
+            table.setBackground(new Color(212,175,55)); // gold
+            tableStatus.set(index,1);
+        } 
+        
+
+        if(status.equals("Done")){
+            table.setBackground(Color.LIGHT_GRAY);
+            tableStatus.set(index,0);
+        }
+
+        updateCounters();
+    }
+}
+
+ private void loadAvailableTables(JComboBox<String> tableBox){
+
+    if(tableBox == null){
+        return;
+    }
+
+    try{
+
+        Connection conn = Dbconnection.getConnection();
+
+        String sql = "SELECT table_no FROM walkin WHERE status!='Done'";
+
+        PreparedStatement pst = conn.prepareStatement(sql);
+
+        ResultSet rs = pst.executeQuery();
+
+        ArrayList<String> occupied = new ArrayList<>();
+
+        while(rs.next()){
+            occupied.add(rs.getString("table_no"));
+        }
+
+        tableBox.removeAllItems();
+
+        for(int i=1;i<=14;i++){
+
+            String table = "T"+i;
+
+            if(!occupied.contains(table)){
+                tableBox.addItem(table);
+            }
+        }
+
+    }catch(Exception e){
+        e.printStackTrace();
+    }
+}
+
     public static void main(String[] args){
         new Dashboard();
     }
+
 }
