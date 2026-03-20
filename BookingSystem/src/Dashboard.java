@@ -4,7 +4,9 @@ import java.awt.event.ComponentEvent;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.sql.Statement;
 import java.time.LocalDate;
+import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import javax.swing.*;
@@ -36,6 +38,11 @@ public class Dashboard extends JFrame {
     private JTextField searchField;
     private JComboBox<String> dateFilterBox;
     private JButton addReservationBtn;
+
+    // Date selector for tables page
+    private JComboBox<LocalDate> tableDateSelector;
+    private LocalDate selectedTableDate;
+    private JLabel dateDisplayLabel;
 
     // tables system
     private JPanel floorPanel;
@@ -78,6 +85,9 @@ public class Dashboard extends JFrame {
                 getHeight()-headerHeight);
 
         add(mainPanel);
+
+        // Load initial table status based on selected date (today or first available March date)
+        loadTablesByDate(selectedTableDate);
 
         addComponentListener(new java.awt.event.ComponentAdapter(){
             public void componentResized(java.awt.event.ComponentEvent evt){
@@ -146,6 +156,11 @@ public class Dashboard extends JFrame {
         listBtn.addActionListener(e -> cardLayout.show(mainPanel,"list"));
         reserveBtn.addActionListener(e -> cardLayout.show(mainPanel,"rsv"));
 
+        logoutBtn.addActionListener(e -> {
+            new Login();
+            this.dispose();
+        });
+
         sidebar.add(title);
         sidebar.add(sub);
         sidebar.add(tablesBtn);
@@ -166,19 +181,55 @@ public class Dashboard extends JFrame {
         DateTimeFormatter format =
                 DateTimeFormatter.ofPattern("EEEE, dd MMM");
 
-        JLabel date =
+        dateDisplayLabel =
                 new JLabel(LocalDate.now().format(format));
 
-        date.setFont(new Font("Arial",Font.BOLD,18));
-        date.setForeground(Color.WHITE);
-        date.setBounds(30,20,250,30);
+        dateDisplayLabel.setFont(new Font("Arial",Font.BOLD,18));
+        dateDisplayLabel.setForeground(Color.WHITE);
+        dateDisplayLabel.setBounds(30,20,250,30);
 
-        reservedLabel = createCounter("Reserved",new Color(0,153,0),300); // green
-        waitingLabel = createCounter("Waiting",new Color(212,175,55),450); // gold
-        seatedLabel = createCounter("Seated",new Color(153,0,0),600); // darker red
-        emptyLabel = createCounter("Empty",new Color(200,200,200),750); // light gray
+        // Date selector for the current month (today until end of month)
+        tableDateSelector = new JComboBox<>();
+        LocalDate today = LocalDate.now();
+        LocalDate startDate = today;
+        LocalDate endOfMonth = today.withDayOfMonth(today.lengthOfMonth());
 
-        header.add(date);
+        for(LocalDate date = startDate; !date.isAfter(endOfMonth); date = date.plusDays(1)) {
+            tableDateSelector.addItem(date);
+        }
+
+        // Select today's date by default
+        tableDateSelector.setSelectedItem(startDate);
+        selectedTableDate = startDate;
+        
+        tableDateSelector.setFont(new Font("Arial",Font.PLAIN,12));
+        tableDateSelector.setBackground(Color.WHITE);
+        tableDateSelector.setForeground(new Color(102,0,32));
+        tableDateSelector.setBounds(300,18,150,35);
+        tableDateSelector.setRenderer(new javax.swing.plaf.basic.BasicComboBoxRenderer() {
+            public java.awt.Component getListCellRendererComponent(javax.swing.JList list, Object value, int index, boolean isSelected, boolean cellHasFocus) {
+                if(value instanceof LocalDate) {
+                    value = ((LocalDate)value).format(DateTimeFormatter.ofPattern("MMM dd"));
+                }
+                return super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
+            }
+        });
+        
+        // Event listener for date change
+        tableDateSelector.addActionListener(e -> {
+            if(tableDateSelector.getSelectedItem() instanceof LocalDate) {
+                selectedTableDate = (LocalDate) tableDateSelector.getSelectedItem();
+                loadTablesByDate(selectedTableDate);
+            }
+        });
+
+        reservedLabel = createCounter("Reserved",new Color(0,153,0),500); // green
+        waitingLabel = createCounter("Waiting",new Color(212,175,55),650); // gold
+        seatedLabel = createCounter("Seated",new Color(153,0,0),800); // darker red
+        emptyLabel = createCounter("Empty",new Color(200,200,200),900); // light gray
+
+        header.add(dateDisplayLabel);
+        header.add(tableDateSelector);
         header.add(reservedLabel);
         header.add(waitingLabel);
         header.add(seatedLabel);
@@ -272,46 +323,48 @@ public class Dashboard extends JFrame {
     paxField.setFont(new Font("Arial",Font.PLAIN,13));
     paxField.setBorder(BorderFactory.createLineBorder(new Color(196,164,100),1));
 
-    JComboBox<String> dateBox = new JComboBox<>();
-    dateBox.setFont(new Font("Arial",Font.PLAIN,13));
-    
-    // Populate dates for next 7 days
-    for(int i = 0; i < 7; i++) {
-        LocalDate date = LocalDate.now().plusDays(i);
-        dateBox.addItem(date.format(DateTimeFormatter.ofPattern("EEEE, MMMM dd, yyyy")));
-    }
+    String[] timeSlots = new String[] {
+        "10:00 AM - 1:00 PM",
+        "1:00 PM - 4:00 PM",
+        "4:00 PM - 7:00 PM",
+        "7:00 PM - 10:00 PM"
+    };
+    JComboBox<String> timeBox = new JComboBox<>(timeSlots);
+    timeBox.setFont(new Font("Arial",Font.PLAIN,13));
 
     JComboBox<String> tableBoxPopup = new JComboBox<>();
     loadAvailableTables(tableBoxPopup);
     tableBoxPopup.setFont(new Font("Arial",Font.PLAIN,13));
     
+    // Update available tables when pax or time changes
     paxField.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
-        public void insertUpdate(javax.swing.event.DocumentEvent e) { updateTablesWithDate(); }
-        public void removeUpdate(javax.swing.event.DocumentEvent e) { updateTablesWithDate(); }
-        public void changedUpdate(javax.swing.event.DocumentEvent e) { updateTablesWithDate(); }
+        public void insertUpdate(javax.swing.event.DocumentEvent e) { updateTables(); }
+        public void removeUpdate(javax.swing.event.DocumentEvent e) { updateTables(); }
+        public void changedUpdate(javax.swing.event.DocumentEvent e) { updateTables(); }
         
-        private void updateTablesWithDate() {
+        private void updateTables() {
             try {
                 int pax = Integer.parseInt(paxField.getText());
-                String dateStr = (String) dateBox.getSelectedItem();
-                LocalDate selectedDate = LocalDate.parse(dateStr, DateTimeFormatter.ofPattern("EEEE, MMMM dd, yyyy"));
-                loadAvailableTablesByPaxAndDate(tableBoxPopup, pax, selectedDate);
+                String timeSlot = (String) timeBox.getSelectedItem();
+                String timeStr = extractStartTime(timeSlot);
+                loadAvailableTablesByPaxAndDateTime(tableBoxPopup, pax, LocalDate.now(), timeStr);
             } catch(Exception ex) {
                 loadAvailableTables(tableBoxPopup);
             }
         }
     });
-    
-    dateBox.addActionListener(ee -> {
+
+    timeBox.addActionListener(ev -> {
         try {
             int pax = Integer.parseInt(paxField.getText());
-            String dateStr = (String) dateBox.getSelectedItem();
-            LocalDate selectedDate = LocalDate.parse(dateStr, DateTimeFormatter.ofPattern("EEEE, MMMM dd, yyyy"));
-            loadAvailableTablesByPaxAndDate(tableBoxPopup, pax, selectedDate);
+            String timeSlot = (String) timeBox.getSelectedItem();
+            String timeStr = extractStartTime(timeSlot);
+            loadAvailableTablesByPaxAndDateTime(tableBoxPopup, pax, LocalDate.now(), timeStr);
         } catch(Exception ex) {
             loadAvailableTables(tableBoxPopup);
         }
     });
+
 
     String[] status = {"Waiting","Seated"};
     JComboBox<String> statusBox = new JComboBox<>(status);
@@ -331,10 +384,10 @@ public class Dashboard extends JFrame {
     form.add(paxLabel);
     form.add(paxField);
 
-    JLabel dateLabel = new JLabel("Date:");
-    dateLabel.setFont(new Font("Arial",Font.BOLD,12));
-    form.add(dateLabel);
-    form.add(dateBox);
+    JLabel timeLabel = new JLabel("Time Slot:");
+    timeLabel.setFont(new Font("Arial",Font.BOLD,12));
+    form.add(timeLabel);
+    form.add(timeBox);
 
     JLabel tableLabel = new JLabel("Table:");
     tableLabel.setFont(new Font("Arial",Font.BOLD,12));
@@ -356,30 +409,37 @@ public class Dashboard extends JFrame {
     if(result == JOptionPane.OK_OPTION){
 
         try{
-            // Parse the selected date
-            String dateStr = (String) dateBox.getSelectedItem();
-            LocalDate walkInDate = LocalDate.parse(dateStr, DateTimeFormatter.ofPattern("EEEE, MMMM dd, yyyy"));
-            
+            // Parse the selected time slot and extract start time
+            String timeSlot = (String) timeBox.getSelectedItem();
+            String timeStr = extractStartTime(timeSlot);
+            LocalTime walkInTime = LocalTime.parse(timeStr);
+
             String walkinTable = tableBoxPopup.getSelectedItem().toString();
             String walkinStatus = statusBox.getSelectedItem().toString();
             
-            // Check if table is reserved on this date
-            if(hasReservationForTable(walkInDate, walkinTable)) {
-                JOptionPane.showMessageDialog(null, "Table " + walkinTable + " has a reservation on " + walkInDate.format(DateTimeFormatter.ofPattern("MMM dd")) + ". Please choose another table.");
+            // Check if table is reserved today
+            LocalDate today = LocalDate.now();
+            if(hasReservationForTable(today, walkinTable)) {
+                JOptionPane.showMessageDialog(null, "Table " + walkinTable + " has a reservation today. Please choose another table.");
                 return;
             }
 
             Connection conn = Dbconnection.getConnection();
 
-            String sql = "INSERT INTO walkin(name,pax,walk_in_date,table_no,status) VALUES(?,?,?,?,?)";
+            // Ensure the walkin table has a walk_in_date column for date filtering
+            ensureWalkinDateColumn();
+
+            // Correct placeholder count: 6 fields, 6 values
+            String sql = "INSERT INTO walkin(name,pax,walk_in_time,table_no,status,walk_in_date) VALUES(?,?,?,?,?,?)";
 
             PreparedStatement pst = conn.prepareStatement(sql);
 
             pst.setString(1,nameField.getText());
             pst.setInt(2,Integer.parseInt(paxField.getText()));
-            pst.setDate(3, java.sql.Date.valueOf(walkInDate));
+            pst.setTime(3, java.sql.Time.valueOf(walkInTime));
             pst.setString(4, walkinTable);
             pst.setString(5, walkinStatus);
+            pst.setDate(6, java.sql.Date.valueOf(LocalDate.now()));
 
             pst.executeUpdate();
 
@@ -411,7 +471,7 @@ public class Dashboard extends JFrame {
     searchField.setPreferredSize(new Dimension(150,34));
     searchField.setBackground(new Color(255,255,255));
 
-    JLabel dateFilterLabel = new JLabel("Date:");
+    JLabel dateFilterLabel = new JLabel("Time:");
     dateFilterLabel.setFont(new Font("Arial",Font.BOLD,13));
     dateFilterLabel.setForeground(new Color(102,0,32));
     
@@ -419,11 +479,12 @@ public class Dashboard extends JFrame {
     dateFilterBox.setFont(new Font("Arial",Font.PLAIN,13));
     dateFilterBox.setPreferredSize(new Dimension(200,34));
     
-    // Populate dates
-    for(int i = 0; i < 7; i++) {
-        LocalDate date = LocalDate.now().plusDays(i);
-        dateFilterBox.addItem(date.format(DateTimeFormatter.ofPattern("EEEE, MMMM dd")));
-    }
+    // Populate time slots
+    dateFilterBox.addItem("All");
+    dateFilterBox.addItem("10:00 AM - 1:00 PM");
+    dateFilterBox.addItem("1:00 PM - 4:00 PM");
+    dateFilterBox.addItem("4:00 PM - 7:00 PM");
+    dateFilterBox.addItem("7:00 PM - 10:00 PM");
     
     searchPanel.add(searchLabel);
     searchPanel.add(searchField);
@@ -437,7 +498,7 @@ public class Dashboard extends JFrame {
     topBar.setBorder(BorderFactory.createEmptyBorder(0,30,0,30));
     topBar.add(addWalkinBtn);
 
-    String[] columns = {"ID","Name","Pax","Date","Table","Status","Edit"};
+    String[] columns = {"ID","Name","Pax","Time","Table","Status","Edit"};
 
     DefaultTableModel model = new DefaultTableModel(columns,0);
 
@@ -612,15 +673,24 @@ public class Dashboard extends JFrame {
         availabilityLabel.setBorder(BorderFactory.createEmptyBorder(10,10,10,10));
         reservationsPanel.add(availabilityLabel, BorderLayout.SOUTH);
 
-        // Add action listeners
+        // Add action listeners (limit navigation to current month)
+        LocalDate currentMonthStart = LocalDate.now().withDayOfMonth(1);
+        LocalDate currentMonthEnd = LocalDate.now().withDayOfMonth(LocalDate.now().lengthOfMonth());
+
         prevMonth.addActionListener(e -> {
-            currentCalendarDate = currentCalendarDate.minusMonths(1);
-            updateCalendar();
+            LocalDate candidate = currentCalendarDate.minusMonths(1);
+            if(!candidate.isBefore(currentMonthStart)) {
+                currentCalendarDate = candidate;
+                updateCalendar();
+            }
         });
 
         nextMonth.addActionListener(e -> {
-            currentCalendarDate = currentCalendarDate.plusMonths(1);
-            updateCalendar();
+            LocalDate candidate = currentCalendarDate.plusMonths(1);
+            if(!candidate.isAfter(currentMonthEnd)) {
+                currentCalendarDate = candidate;
+                updateCalendar();
+            }
         });
 
         // Main content
@@ -819,9 +889,10 @@ public class Dashboard extends JFrame {
         JComboBox<String> dateBox = new JComboBox<>();
         dateBox.setFont(new Font("Arial",Font.PLAIN,13));
         
-        // Populate dates for next 7 days
-        for(int i = 0; i < 7; i++) {
-            LocalDate date = LocalDate.now().plusDays(i);
+        // Populate dates from today until end of current month
+        LocalDate today = LocalDate.now();
+        LocalDate endOfMonth = today.withDayOfMonth(today.lengthOfMonth());
+        for(LocalDate date = today; !date.isAfter(endOfMonth); date = date.plusDays(1)) {
             dateBox.addItem(date.format(DateTimeFormatter.ofPattern("EEEE, MMMM dd, yyyy")));
         }
         
@@ -983,7 +1054,7 @@ public class Dashboard extends JFrame {
         int w = (int)(r.width * scale);
         int h = (int)(r.height * scale);
 
-        tables.get(i).setBounds(x,y,w,h);
+       tables.get(i).setBounds(x,y,w,h);
     }
 
     floorPanel.repaint();
@@ -1227,47 +1298,51 @@ class ButtonEditor extends DefaultCellEditor {
     }
 }
 
-    private void loadWalkinData(){
+    private void loadWalkinData() {
+        loadWalkinData(LocalDate.now());
+    }
 
-    try{
+    private void loadWalkinData(LocalDate date) {
+        try {
+            ensureWalkinDateColumn();
+            Connection conn = Dbconnection.getConnection();
 
-        Connection conn = Dbconnection.getConnection();
+            String sql = "SELECT * FROM walkin WHERE DATE(walk_in_date) = ? ORDER BY walk_in_time DESC, id DESC";
+            PreparedStatement pst = conn.prepareStatement(sql);
+            pst.setDate(1, java.sql.Date.valueOf(date));
+            ResultSet rs = pst.executeQuery();
 
-        String sql = "SELECT * FROM walkin ORDER BY walk_in_date DESC, id DESC";
+            DefaultTableModel model = (DefaultTableModel) walkinTable.getModel();
+            model.setRowCount(0);
 
-        PreparedStatement pst = conn.prepareStatement(sql);
+            while(rs.next()) {
+                String name = rs.getString("name");
+                int pax = rs.getInt("pax");
+                LocalTime walkInTime = rs.getTime("walk_in_time").toLocalTime();
+                String tableNo = rs.getString("table_no");
+                String status = rs.getString("status");
 
-        ResultSet rs = pst.executeQuery();
-
-        DefaultTableModel model = (DefaultTableModel) walkinTable.getModel();
-
-        model.setRowCount(0);
-
-        while(rs.next()){
-
-            String name = rs.getString("name");
-            int pax = rs.getInt("pax");
-            LocalDate walkInDate = rs.getDate("walk_in_date").toLocalDate();
-            String tableNo = rs.getString("table_no");
-            String status = rs.getString("status");
-
-            model.addRow(new Object[]{
-            rs.getInt("id"),
-            name,
-            pax,
-            walkInDate.format(DateTimeFormatter.ofPattern("MMM dd, yyyy")),
-            tableNo,
-            status,
-            "Edit"
+                model.addRow(new Object[]{
+                    rs.getInt("id"),
+                    name,
+                    pax,
+                    walkInTime.format(DateTimeFormatter.ofPattern("h:mm a")),
+                    tableNo,
+                    status,
+                    "Edit"
                 });
 
-            updateTableFromWalkin(tableNo,status);
-        }
+                updateTableFromWalkin(tableNo,status);
+            }
 
-    }catch(Exception e){
-        e.printStackTrace();
+            rs.close();
+            pst.close();
+            conn.close();
+
+        } catch(Exception e) {
+            e.printStackTrace();
+        }
     }
-}
 
     private void filterWalkinTable(){
         DefaultTableModel model = (DefaultTableModel) walkinTable.getModel();
@@ -1275,19 +1350,33 @@ class ButtonEditor extends DefaultCellEditor {
         
         loadWalkinData();
         
-        String searchText = ""; // searchField.getText().toLowerCase().trim();
+        String searchText = "";
         if(searchField != null) {
             searchText = searchField.getText().toLowerCase().trim();
         }
         
-        String selectedDate = "";
+        String selectedTime = "All";
         if(dateFilterBox != null) {
-            selectedDate = (String) dateFilterBox.getSelectedItem();
+            selectedTime = (String) dateFilterBox.getSelectedItem();
+        }
+
+        LocalTime selectedStartTime = null;
+        if(selectedTime != null && !selectedTime.equals("All")) {
+            String startTime = extractStartTime(selectedTime);
+            try {
+                selectedStartTime = LocalTime.parse(startTime, DateTimeFormatter.ofPattern("H:mm"));
+            } catch(Exception ex) {
+                try {
+                    selectedStartTime = LocalTime.parse(startTime, DateTimeFormatter.ofPattern("HH:mm"));
+                } catch(Exception ignored) {
+                    selectedStartTime = null;
+                }
+            }
         }
 
         for(int i = model.getRowCount() - 1; i >= 0; i--){
             boolean matchesSearch = true;
-            boolean matchesDate = true;
+            boolean matchesTime = true;
             
             if(!searchText.isEmpty()) {
                 String name = model.getValueAt(i, 1).toString().toLowerCase();
@@ -1296,12 +1385,17 @@ class ButtonEditor extends DefaultCellEditor {
                 matchesSearch = name.contains(searchText) || table.contains(searchText) || status.contains(searchText);
             }
             
-            if(selectedDate != null && !selectedDate.isEmpty()) {
-                String date = model.getValueAt(i, 3).toString();
-                matchesDate = date.contains(selectedDate.split(",")[0]); // Match month and day
+            if(selectedStartTime != null) {
+                String time = model.getValueAt(i, 3).toString();
+                try {
+                    LocalTime rowTime = LocalTime.parse(time, DateTimeFormatter.ofPattern("h:mm a"));
+                    matchesTime = rowTime.equals(selectedStartTime);
+                } catch(Exception ex) {
+                    matchesTime = time.contains(selectedTime);
+                }
             }
 
-            if(!matchesSearch || !matchesDate){
+            if(!matchesSearch || !matchesTime){
                 model.removeRow(i);
             }
         }
@@ -1337,6 +1431,32 @@ class ButtonEditor extends DefaultCellEditor {
 
         updateCounters();
     }
+}
+
+private String extractStartTime(String timeSlot) {
+    // Convert "10:00 AM - 1:00 PM" to "10:00" (24h) and "7:00 PM - 10:00 PM" to "19:00"
+    if(timeSlot != null && timeSlot.contains("-")) {
+        String[] parts = timeSlot.split("-");
+        String startTime = parts[0].trim();
+
+        if(startTime.toUpperCase().contains("AM") || startTime.toUpperCase().contains("PM")) {
+            DateTimeFormatter[] formats = new DateTimeFormatter[] {
+                DateTimeFormatter.ofPattern("h:mm a"),
+                DateTimeFormatter.ofPattern("hh:mm a")
+            };
+            for(DateTimeFormatter fmt : formats) {
+                try {
+                    LocalTime lt = LocalTime.parse(startTime, fmt);
+                    return lt.format(DateTimeFormatter.ofPattern("HH:mm"));
+                } catch(Exception ignored) {
+                    // try next format
+                }
+            }
+            // fallback: return raw start time trimmed without losing the user-selected value
+            return startTime.replaceAll("AM|PM", "").trim();
+        }
+    }
+    return timeSlot;
 }
 
 private boolean hasReservationForTable(LocalDate date, String tableNo){
@@ -1385,9 +1505,8 @@ private void loadAvailableTablesByPaxAndDateTime(JComboBox<String> tableBox, int
         Connection conn = Dbconnection.getConnection();
 
         // Get walk-ins for the selected date
-        String walkinSql = "SELECT table_no FROM walkin WHERE DATE(walk_in_date) = ? AND status != 'Done'";
+        String walkinSql = "SELECT table_no FROM walkin WHERE status != 'Done'";
         PreparedStatement walkinPst = conn.prepareStatement(walkinSql);
-        walkinPst.setDate(1, java.sql.Date.valueOf(date));
         ResultSet walkinRs = walkinPst.executeQuery();
 
         ArrayList<String> occupied = new ArrayList<>();
@@ -1426,8 +1545,6 @@ private void loadAvailableTablesByPaxAndDateTime(JComboBox<String> tableBox, int
                     matchesPax = false;  // Only tables 12-14 for 1-3 pax
                 } else if(pax > 9) {
                     matchesPax = false;  // No suitable table
-                } else if(pax < 1) {
-                    matchesPax = false;
                 }
             }
 
@@ -1444,6 +1561,187 @@ private void loadAvailableTablesByPaxAndDateTime(JComboBox<String> tableBox, int
 private void filterTable(String query) {
     filterWalkinTable();
 }
+
+    /**
+     * Normalize table numbering so database entries match UI table IDs
+     * Examples:
+     *  - "T1" -> "T1"
+     *  - "Table 1" -> "T1"
+     *  - "1" -> "T1"
+     */
+    private String normalizeTableNo(String raw) {
+        if(raw == null) return null;
+        raw = raw.trim();
+        if(raw.startsWith("T")) return raw;
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("(\\d+)").matcher(raw);
+        if(m.find()) {
+            return "T" + m.group(1);
+        }
+        return raw;
+    }
+
+    /**
+     * Main method to load and update tables based on selected date
+     * Fetches all reservations for the given date and updates table colors accordingly
+     */
+    private void loadTablesByDate(LocalDate selectedDate) {
+        try {
+            if(selectedDate == null) {
+                System.out.println("[loadTablesByDate] selectedDate is null");
+                return;
+            }
+
+            // Log the selected date for debugging
+            System.out.println("[loadTablesByDate] selectedDate=" + selectedDate);
+
+            // Get reservation data for this date
+            java.util.Map<String, String> tableReservations = filterReservationsByDate(selectedDate);
+            System.out.println("[loadTablesByDate] reservations found=" + tableReservations.size());
+
+            // Get walk-in data for this date
+            java.util.Map<String, String> tableWalkIns = getWalkInsByDate(selectedDate);
+            System.out.println("[loadTablesByDate] walk-ins found=" + tableWalkIns.size());
+
+            // Update table colors based on combined data
+            for(int i = 0; i < tables.size(); i++) {
+                String tableNumber = "T" + (i + 1);  // Table naming convention
+                Color newColor = getTableStatusForDate(tableNumber, selectedDate, tableReservations, tableWalkIns);
+                JPanel table = tables.get(i);
+                table.setBackground(newColor);
+                tableStatus.set(i, detectStatus(newColor));
+            }
+
+            updateCounters();
+            floorPanel.revalidate();
+            floorPanel.repaint();
+
+        } catch(Exception ex) {
+            ex.printStackTrace();
+        }
+    }
+
+    /**
+     * Fetches all reservations for a specific date and returns a map of table_no -> status
+     */
+    private java.util.Map<String, String> filterReservationsByDate(LocalDate selectedDate) {
+        java.util.Map<String, String> tableStatusMap = new java.util.HashMap<>();
+        
+        try {
+            Connection conn = Dbconnection.getConnection();
+            String sql = "SELECT reservation_date, table_no, status FROM reservations WHERE DATE(reservation_date) = ? AND status != 'Cancelled'";
+            PreparedStatement pst = conn.prepareStatement(sql);
+            pst.setDate(1, java.sql.Date.valueOf(selectedDate));
+            ResultSet rs = pst.executeQuery();
+            
+            while(rs.next()) {
+                LocalDate dbDate = rs.getDate("reservation_date").toLocalDate();
+                String tableNoRaw = rs.getString("table_no");
+                String status = rs.getString("status");
+
+                String tableNo = normalizeTableNo(tableNoRaw);
+
+                System.out.println("[filterReservationsByDate] dbDate=" + dbDate + ", selectedDate=" + selectedDate + ", tableNoRaw='" + tableNoRaw + "', normalized='" + tableNo + "', status=" + status);
+
+                // Only update if we don't already have a higher priority status
+                if(!tableStatusMap.containsKey(tableNo)) {
+                    tableStatusMap.put(tableNo, status);
+                }
+            }
+            
+            rs.close();
+            pst.close();
+            conn.close();
+            
+        } catch(Exception ex) {
+            ex.printStackTrace();
+        }
+        
+        return tableStatusMap;
+    }
+
+    /**
+     * Fetches all walk-ins for a specific date and returns a map of table_no -> status
+     * Walk-ins now have dates stored, so we retrieve them by date
+     */
+    private java.util.Map<String, String> getWalkInsByDate(LocalDate selectedDate) {
+        java.util.Map<String, String> tableStatusMap = new java.util.HashMap<>();
+        
+        try {
+            Connection conn = Dbconnection.getConnection();
+            String sql = "SELECT table_no, status FROM walkin WHERE status != 'Done' AND DATE(walk_in_date) = ?";
+            PreparedStatement pst = conn.prepareStatement(sql);
+            pst.setDate(1, java.sql.Date.valueOf(selectedDate));
+            ResultSet rs = pst.executeQuery();
+            
+            while(rs.next()) {
+                String tableNoRaw = rs.getString("table_no");
+                String status = rs.getString("status");
+
+                String tableNo = normalizeTableNo(tableNoRaw);
+
+                System.out.println("[getWalkInsByDate] tableNoRaw='" + tableNoRaw + "', normalized='" + tableNo + "', status=" + status);
+
+                tableStatusMap.put(tableNo, status);
+            }
+            
+            rs.close();
+            pst.close();
+            conn.close();
+            
+        } catch(Exception ex) {
+            ex.printStackTrace();
+        }
+        
+        return tableStatusMap;
+    }
+
+    /**
+     * Ensure walkin table has walk_in_date column for date-based filtering
+     */
+    private void ensureWalkinDateColumn() {
+        try {
+            Connection conn = Dbconnection.getConnection();
+            Statement stmt = conn.createStatement();
+            stmt.execute("ALTER TABLE walkin ADD COLUMN IF NOT EXISTS walk_in_date DATE");
+            stmt.close();
+            conn.close();
+        } catch (Exception e) {
+            // ignore if the column already exists or DB doesn't support it
+            System.out.println("ensureWalkinDateColumn: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Determines the color of a table based on its reservation/walk-in status for a specific date
+     */
+    private Color getTableStatusForDate(String tableNo, LocalDate selectedDate, 
+                                        java.util.Map<String, String> reservations, 
+                                        java.util.Map<String, String> walkIns) {
+        
+        // Priority: Walk-ins > Reservations
+        if(walkIns.containsKey(tableNo)) {
+            String status = walkIns.get(tableNo);
+            if(status.equalsIgnoreCase("Seated")) {
+                return new Color(102, 0, 0);        // Dark red for seated
+            } else if(status.equalsIgnoreCase("Waiting")) {
+                return new Color(212, 175, 55);     // Gold for waiting
+            }
+        }
+        
+        if(reservations.containsKey(tableNo)) {
+            String status = reservations.get(tableNo);
+            if(status.equalsIgnoreCase("Reserved") || status.equalsIgnoreCase("Confirmed") || status.equalsIgnoreCase("Booked")) {
+                return new Color(0, 153, 0);        // Green for reserved/confirmed/booked
+            } else if(status.equalsIgnoreCase("Seated")) {
+                return new Color(102, 0, 0);        // Dark red for seated
+            } else if(status.equalsIgnoreCase("Waiting")) {
+                return new Color(212, 175, 55);     // Gold for waiting
+            }
+        }
+        
+        // Default: Empty
+        return new Color(211, 211, 211);           // Light gray for empty
+    }
 
     public static void main(String[] args){
         new Dashboard();

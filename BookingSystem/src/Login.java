@@ -1,9 +1,8 @@
-import javax.swing.*;
 import java.awt.*;
-
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import javax.swing.*;
 
 public class Login extends JFrame {
 
@@ -79,14 +78,7 @@ public class Login extends JFrame {
         txtPassword.setBackground(new Color(0,0,0,100));
         loginPanel.add(txtPassword);
 
-        // Forgot button
-        btnForgot = new JButton("Forgot Password?");
-        btnForgot.setBounds(130, 100, 200, 25);
-        btnForgot.setBorderPainted(false);
-        btnForgot.setContentAreaFilled(false);
-        btnForgot.setForeground(Color.BLUE);
-        btnForgot.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-        loginPanel.add(btnForgot);
+       
 
         // Login button
         btnLogin = new JButton("Login");
@@ -97,7 +89,7 @@ public class Login extends JFrame {
 
         // Action listeners
         btnLogin.addActionListener(e -> loginAction());
-        btnForgot.addActionListener(e -> JOptionPane.showMessageDialog(this, "Forgot password clicked!"));
+       
 
         // Re-center panel when window resizes
         addComponentListener(new java.awt.event.ComponentAdapter() {

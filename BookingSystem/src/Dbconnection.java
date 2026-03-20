@@ -7,6 +7,8 @@ public class Dbconnection {
     public static Connection getConnection(){
 
         try{
+            // Explicitly load MySQL JDBC driver
+            Class.forName("com.mysql.cj.jdbc.Driver");
 
             String url = "jdbc:mysql://localhost:3306/crimson_oak";
             String user = "root";
